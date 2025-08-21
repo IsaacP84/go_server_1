@@ -1,26 +1,38 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"os/signal"
 	"time"
 
 	"github.com/isaacp84/go_server_1/internal/game"
+	"github.com/isaacp84/go_server_1/internal/http/routers"
 )
 
-func main() {
-	fmt.Println("Hello world")
-	var game game.Game
+func run(ctx context.Context, w io.Writer, args []string) error {
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+	defer cancel()
 
-	tickDuration := time.Second / 20
+	fmt.Println("Hello world")
+
+	http.Handle("/", routers.Root{})
+	log.Fatal(http.ListenAndServe(":8080", nil))
+
+	// defer http.close
+	var my_game game.Game
+	tickDuration := time.Second / 10
 	ticker := time.NewTicker(tickDuration)
 	defer ticker.Stop()
 
-	game.Players()
+	my_game.Players()
 
-	conn := startUDPConn()
+	conn, _ := startUDPConn()
 	// Close the connection when we're done
 	defer conn.Close()
 
@@ -49,6 +61,18 @@ func main() {
 					log.Printf("Error reading from UDP: %v", err)
 					continue
 				}
+				switch string(buffer[:4]) {
+				case "JN  ":
+					name := string(buffer[4:19])
+					p := game.Player{Name: name, Addr: addr}
+					fmt.Println(p)
+					my_game.AddPlayer(p)
+					log.Printf("Player joined: %s", name)
+
+				case "LV  ":
+				default:
+				}
+
 				// handleConnection(conn, addr, buffer)
 
 				// Send a copy of the received data to avoid data races
@@ -69,19 +93,29 @@ func main() {
 
 		case <-ticker.C:
 			// Game code
+			my_game.Update(conn)
+
 			// fmt.Println("Game tick.")
 
 		case <-time.After(3 * time.Second):
 			fmt.Println("Game stopped.")
 			close(doneChan) // Signal the reader goroutine to exit
-
-			return
+			return nil
 		}
 	}
 
 }
 
-func startUDPConn() *net.UDPConn {
+func main() {
+	ctx := context.Background()
+	if err := run(ctx, os.Stdout, os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(1)
+	}
+
+}
+
+func startUDPConn() (*net.UDPConn, *net.UDPAddr) {
 	// Resolve the string address to a UDP address
 	addr, err := net.ResolveUDPAddr("udp", ":27015")
 
@@ -95,11 +129,11 @@ func startUDPConn() *net.UDPConn {
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
-		return nil
+		return nil, nil
 	}
 
 	fmt.Println("started connection")
-	return conn
+	return conn, addr
 
 }
 

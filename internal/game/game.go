@@ -7,6 +7,8 @@ import (
 
 type Game struct {
 	players []Player
+	Ball    Ball
+	Paddles []Paddle
 }
 
 func (g *Game) Players() []Player {
@@ -30,19 +32,18 @@ func (g *Game) Update(conn *net.UDPConn) {
 	}
 }
 
+type Ball struct {
+	Location *Location
+}
+
+type Paddle struct {
+	Location *Location
+}
+
 type Player struct {
 	Name string
 	Addr *net.UDPAddr
-	loc  *Location
 }
-
-// func (p *Player) Name() string {
-// 	return p.name
-// }
-
-// func (p *Player) SetName(s string) {
-// 	p.name = s
-// }
 
 type Location struct {
 	x, y float32

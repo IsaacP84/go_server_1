@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"time"
 
 	"github.com/isaacp84/go_server_1/internal/game"
@@ -16,8 +15,8 @@ import (
 )
 
 func run(ctx context.Context, w io.Writer, args []string) error {
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-	defer cancel()
+	// ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+	// defer cancel()
 
 	fmt.Println("Hello world")
 

@@ -107,7 +107,7 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 	wg.Go(func() {
 		ReadUDPPackets(ctx, packetChan, conn)
 	})
-	// go
+
 	// Game loop
 	wg.Go(func() {
 		pong.Run(ctx, packetChan)
@@ -116,8 +116,6 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 	<-sigChan
 	fmt.Println("Received termination signal, shutting down...")
 	cancel()
-
-	// close(doneChan)
 
 	select {
 	case <-time.After(5 * time.Second):

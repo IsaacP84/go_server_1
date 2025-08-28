@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -15,62 +16,6 @@ import (
 )
 
 // var udp_running atomic.Bool
-
-func run(ctx context.Context, w io.Writer, args []string) error {
-	ctx, cancel := context.WithCancel(ctx)
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
-
-	fmt.Println("Hello world")
-
-	var my_game game.Game
-
-	my_game.Players()
-
-	// Channel to send received UDP packets
-	packetChan := make(chan []byte)
-	conn, _ := startUDPConn()
-	// Close the connection when we're done
-	defer conn.Close()
-
-	my_game.LinkUDP(conn)
-
-	// Channel to signal shutdown
-	// doneChan := make(chan struct{})
-
-	// Accept incoming connections and handle them
-	// Goroutine to read UDP packets
-	go ReadUDPPackets(ctx, packetChan, conn)
-
-	// Game loop
-	go my_game.Run(ctx, packetChan)
-
-	<-sigChan
-	fmt.Println("Received termination signal, shutting down...")
-	// close(doneChan)
-	cancel()
-
-	select {
-	case <-time.After(5 * time.Second):
-		fmt.Println("Graceful shutdown timeout exceeded. Exiting forcefully.")
-	case <-ctx.Done():
-		fmt.Println("Server gracefully shutdown.")
-	}
-
-	return nil
-}
-
-func main() {
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := run(ctx, os.Stdout, os.Args); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		os.Exit(1)
-	}
-
-}
 
 func startUDPConn() (*net.UDPConn, *net.UDPAddr) {
 	// Resolve the string address to a UDP address
@@ -93,6 +38,7 @@ func startUDPConn() (*net.UDPConn, *net.UDPAddr) {
 
 func ReadUDPPackets(ctx context.Context, packetChan chan []byte, conn *net.UDPConn) {
 	buffer := make([]byte, 512)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -100,8 +46,18 @@ func ReadUDPPackets(ctx context.Context, packetChan chan []byte, conn *net.UDPCo
 			conn.Close()
 			return
 		default:
+			if ctx.Done() == nil {
+				continue
+			}
+
+			readDeadline := time.Now().Add(50 * time.Millisecond)
+			if err := conn.SetReadDeadline(readDeadline); err != nil {
+				fmt.Println("Error setting read deadline:", err)
+				return
+			}
 			// Read incoming data
 			n, addr, err := conn.ReadFromUDP(buffer)
+
 			if err != nil {
 				// Handle temporary errors or log persistent ones
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -117,7 +73,72 @@ func ReadUDPPackets(ctx context.Context, packetChan chan []byte, conn *net.UDPCo
 			packetChan <- data
 			fmt.Printf("Received %d bytes from %s: %s\n", n, addr.String(), string(data))
 		}
+
 	}
+}
+
+func run(ctx context.Context, w io.Writer, args []string) error {
+	ctx, cancel := context.WithCancel(ctx)
+
+	var wg sync.WaitGroup
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
+
+	fmt.Println("Hello world")
+
+	var pong game.Game
+
+	pong.Players()
+
+	// Channel to send received UDP packets
+	packetChan := make(chan []byte)
+	conn, _ := startUDPConn()
+	// Close the connection when we're done
+	defer conn.Close()
+
+	pong.LinkUDP(conn)
+
+	// Channel to signal shutdown
+	// doneChan := make(chan struct{})
+
+	// Accept incoming connections and handle them
+	// Goroutine to read UDP packets
+	wg.Go(func() {
+		ReadUDPPackets(ctx, packetChan, conn)
+	})
+	// go
+	// Game loop
+	wg.Go(func() {
+		pong.Run(ctx, packetChan)
+	})
+
+	<-sigChan
+	fmt.Println("Received termination signal, shutting down...")
+	cancel()
+
+	// close(doneChan)
+
+	select {
+	case <-time.After(5 * time.Second):
+		fmt.Println("Graceful shutdown timeout exceeded. Exiting forcefully.")
+	case <-ctx.Done():
+		wg.Wait()
+		fmt.Println("Server gracefully shutdown.")
+	}
+
+	return nil
+}
+
+func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := run(ctx, os.Stdout, os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		cancel()
+		os.Exit(1)
+	}
+
 }
 
 // func handleConnection(conn *net.UDPConn, addr *net.UDPAddr, buf []byte) {

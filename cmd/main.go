@@ -6,24 +6,23 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
+	"os/signal"
 	"time"
 
 	"github.com/isaacp84/go_server_1/internal/game"
-	"github.com/isaacp84/go_server_1/internal/http/routers"
 )
 
+// var udp_running atomic.Bool
+
 func run(ctx context.Context, w io.Writer, args []string) error {
-	// ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-	// defer cancel()
+	sigChan, _ := signal.NotifyContext(ctx, os.Interrupt)
 
 	fmt.Println("Hello world")
 
-	http.Handle("/", routers.Root{})
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// http.Handle("/", routers.Root{})
+	// log.Fatal(http.ListenAndServe(":8080", nil))
 
-	// defer http.close
 	var my_game game.Game
 	tickDuration := time.Second / 10
 	ticker := time.NewTicker(tickDuration)
@@ -38,17 +37,22 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 	// Channel to send received UDP packets
 	packetChan := make(chan []byte)
 	// Channel to signal shutdown
-	doneChan := make(chan struct{})
+	// doneChan := make(chan struct{})
 
 	// Accept incoming connections and handle them
 	// Goroutine to read UDP packets
 	go func() {
+
 		buffer := make([]byte, 512)
 		for {
 			select {
-			case <-doneChan:
-				fmt.Println("UDP reader goroutine exiting.")
+			case <-ctx.Done():
+				fmt.Println("Server context cancelled, stopping UDP listener.")
 				return
+			// case <-doneChan:
+			// 	fmt.Println("UDP reader goroutine exiting.")
+			// 	conn.Close()
+			// 	return
 			default:
 				// Read incoming data
 				n, addr, err := conn.ReadFromUDP(buffer)
@@ -59,17 +63,6 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 					}
 					log.Printf("Error reading from UDP: %v", err)
 					continue
-				}
-				switch string(buffer[:4]) {
-				case "JN  ":
-					name := string(buffer[4:19])
-					p := game.Player{Name: name, Addr: addr}
-					fmt.Println(p)
-					my_game.AddPlayer(p)
-					log.Printf("Player joined: %s", name)
-
-				case "LV  ":
-				default:
 				}
 
 				// handleConnection(conn, addr, buffer)
@@ -84,34 +77,58 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 	}()
 
 	// Game loop
-	for {
-		select {
+	// go func() error {
+	// 	for {
+	// 		select {
+	// 		case <-ctx.Done():
+	// 			fmt.Println("Server context cancelled, stopping game routine.")
+	// 			return nil
+	// 		case packet := <-packetChan:
+	// 			fmt.Printf("Processing packet: %s\n", string(packet))
+	// 			switch string(packet[:4]) {
+	// 			case "JN  ":
+	// 				name := string(packet[4:19])
+	// 				p := game.Player{Name: name}
+	// 				fmt.Println(p)
+	// 				my_game.AddPlayer(p)
+	// 				log.Printf("Player joined: %s", name)
 
-		case packet := <-packetChan:
-			fmt.Printf("Processing packet: %s\n", string(packet))
+	// 			case "LV  ":
+	// 			default:
+	// 			}
 
-		case <-ticker.C:
-			// Game code
-			my_game.Update(conn)
+	// 		case <-ticker.C:
+	// 			// Game code
+	// 			my_game.Update(conn)
 
-			// fmt.Println("Game tick.")
+	// 			// fmt.Println("Game tick.")
+	// 		}
+	// 	}
+	// }()
 
-		case <-time.After(3 * time.Second):
-			fmt.Println("Game stopped.")
-			close(doneChan) // Signal the reader goroutine to exit
-			return nil
-		}
-	}
+	<-sigChan.Done()
+	fmt.Println("Received termination signal, shutting down...")
+	// close(doneChan)
+	// cancel()
 
+	return nil
 }
 
 func main() {
-	ctx := context.Background()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	if err := run(ctx, os.Stdout, os.Args); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
 	}
 
+	select {
+	case <-time.After(5 * time.Second):
+		fmt.Println("Graceful shutdown timeout exceeded. Exiting forcefully.")
+	case <-ctx.Done():
+		fmt.Println("Server gracefully shutdown.")
+	}
 }
 
 func startUDPConn() (*net.UDPConn, *net.UDPAddr) {
@@ -131,6 +148,7 @@ func startUDPConn() (*net.UDPConn, *net.UDPAddr) {
 		return nil, nil
 	}
 
+	// udp_running.Store(true)
 	fmt.Println("started connection")
 	return conn, addr
 

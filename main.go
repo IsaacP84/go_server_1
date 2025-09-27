@@ -6,16 +6,17 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/isaacp84/go_server_1/cmd/server"
 	"github.com/isaacp84/go_server_1/internal/game"
 )
-
-// var udp_running atomic.Bool
 
 func startUDPConn() (*net.UDPConn, *net.UDPAddr) {
 	// Resolve the string address to a UDP address
@@ -43,42 +44,50 @@ func ReadUDPPackets(ctx context.Context, packetChan chan []byte, conn *net.UDPCo
 		select {
 		case <-ctx.Done():
 			fmt.Println("Server context cancelled, stopping UDP listener.")
-			conn.Close()
 			return
 		default:
-			if ctx.Done() == nil {
-				continue
-			}
-
 			readDeadline := time.Now().Add(50 * time.Millisecond)
 			if err := conn.SetReadDeadline(readDeadline); err != nil {
 				fmt.Println("Error setting read deadline:", err)
 				return
 			}
 			// Read incoming data
-			n, addr, err := conn.ReadFromUDP(buffer)
+			n, remoteAddr, err := conn.ReadFromUDP(buffer)
 
 			if err != nil {
 				// Handle temporary errors or log persistent ones
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					// fmt.Println("Read timeout, still listening...")
 					continue // It's a timeout, try again
 				}
+
+				if err == os.ErrClosed || strings.Contains(err.Error(), "use of closed network connection") {
+					fmt.Println("UDP connection closed, stopping read loop.")
+					break // Exit the loop if the connection is closed
+				}
+
 				log.Printf("Error reading from UDP: %v", err)
-				continue
+				break
 			}
 
 			// Send a copy of the received data to avoid data races
 			data := make([]byte, n)
 			copy(data, buffer[:n])
-			packetChan <- data
-			fmt.Printf("Received %d bytes from %s: %s\n", n, addr.String(), string(data))
-		}
 
+			packetChan <- data
+			fmt.Printf("Received %d bytes from %s: %s\n", n, remoteAddr.String(), string(data))
+
+			response := []byte("ACK: " + string(data[:n]))
+			_, err = conn.WriteToUDP(response, remoteAddr)
+			if err != nil {
+				fmt.Printf("Error writing to UDP: %v\n", err)
+			}
+		}
 	}
 }
 
-func run(ctx context.Context, w io.Writer, args []string) error {
-	ctx, cancel := context.WithCancel(ctx)
+func run(p_ctx context.Context, w io.Writer, args []string) error {
+	ctx, cancel := context.WithCancel(p_ctx)
 
 	var wg sync.WaitGroup
 
@@ -91,11 +100,34 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 
 	pong.Players()
 
+	srv := server.NewServer()
+
+	httpServer := &http.Server{
+		Addr:    ":8080",
+		Handler: srv,
+	}
+
+	go func() {
+		log.Printf("listening on %s\n", httpServer.Addr)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "error listening and serving: %s\n", err)
+		}
+
+	}()
+	wg.Go(func() {
+		<-ctx.Done()
+		shutdownCtx := context.Background()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "error shutting down http server: %s\n", err)
+		}
+		fmt.Println("HTTP server stopped.")
+	})
+
 	// Channel to send received UDP packets
 	packetChan := make(chan []byte)
 	conn, _ := startUDPConn()
 	// Close the connection when we're done
-	defer conn.Close()
+	// defer conn.Close()
 
 	pong.LinkUDP(conn)
 
@@ -104,12 +136,17 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 
 	// Accept incoming connections and handle them
 	// Goroutine to read UDP packets
-	wg.Go(func() {
+	go func() {
 		ReadUDPPackets(ctx, packetChan, conn)
+	}()
+	wg.Go(func() {
+		<-ctx.Done()
+		conn.Close()
 	})
 
 	// Game loop
 	wg.Go(func() {
+		<-ctx.Done()
 		pong.Run(ctx, packetChan)
 	})
 
@@ -129,19 +166,10 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 }
 
 func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 	if err := run(ctx, os.Stdout, os.Args); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
-		cancel()
 		os.Exit(1)
 	}
 
 }
-
-// func handleConnection(conn *net.UDPConn, addr *net.UDPAddr, buf []byte) {
-// 	// Print the incoming data
-// 	fmt.Print("> ", string(buf[0:]))
-// 	// Write back the message over UPD
-// 	conn.WriteToUDP([]byte("Hello UDP Client\n"), addr)
-// }

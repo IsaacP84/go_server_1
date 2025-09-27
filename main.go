@@ -103,7 +103,7 @@ func run(p_ctx context.Context, w io.Writer, args []string) error {
 	srv := server.NewServer()
 
 	httpServer := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":80",
 		Handler: srv,
 	}
 
@@ -111,6 +111,7 @@ func run(p_ctx context.Context, w io.Writer, args []string) error {
 		log.Printf("listening on %s\n", httpServer.Addr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintf(os.Stderr, "error listening and serving: %s\n", err)
+			cancel()
 		}
 
 	}()
@@ -150,7 +151,11 @@ func run(p_ctx context.Context, w io.Writer, args []string) error {
 		pong.Run(ctx, packetChan)
 	})
 
-	<-sigChan
+	select {
+	case <-ctx.Done():
+	case <-sigChan:
+	}
+
 	fmt.Println("Received termination signal, shutting down...")
 	cancel()
 

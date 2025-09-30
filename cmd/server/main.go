@@ -6,10 +6,10 @@ import (
 	"github.com/isaacp84/go_server_1/internal/routes"
 )
 
-func NewServer() http.Handler {
+func NewRouter() http.Handler {
 	mux := http.NewServeMux()
 	routes.AddRoutes(mux)
-	var handler http.Handler = mux
+	// var handler http.Handler = mux
 
-	return handler
+	return mux
 }

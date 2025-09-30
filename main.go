@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/isaacp84/go_server_1/cmd/server"
+	"github.com/isaacp84/go_server_1/config"
 	"github.com/isaacp84/go_server_1/internal/game"
 )
 
@@ -94,17 +95,17 @@ func run(p_ctx context.Context, w io.Writer, args []string) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 
+	// config
+	config.LoadConfig(".")
 	fmt.Println("Hello world")
 
 	var pong game.Game
 
 	pong.Players()
 
-	srv := server.NewServer()
-
 	httpServer := &http.Server{
-		Addr:    ":80",
-		Handler: srv,
+		Addr:    fmt.Sprintf(":%s", config.LoadedConfig.Server.Port),
+		Handler: server.NewRouter(),
 	}
 
 	go func() {

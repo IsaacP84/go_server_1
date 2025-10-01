@@ -2,7 +2,7 @@
 INSTALL_DIR="./temp"
 echo Installing to $INSTALL_DIR
 
-# ./scripts/build.sh
+./scripts/build.sh
 # mv the bin file to /usr/bin
 # web pages go to /var/www/html/
 # config goes to /usr/local/etc/

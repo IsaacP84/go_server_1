@@ -96,8 +96,14 @@ func run(p_ctx context.Context, w io.Writer, args []string) error {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 
 	// config
-	config.LoadConfig(".")
+	// config.LoadConfig(".")
+	config.LoadConfig("./etc/pi-server")
+
 	fmt.Println("Hello world")
+	{
+		dir, _ := os.Getwd()
+		fmt.Println("cwd: " + dir)
+	}
 
 	var pong game.Game
 
